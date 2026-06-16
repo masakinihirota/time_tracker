@@ -1,0 +1,17 @@
+{
+    "manifest_version": 3,
+    "name": "time tracker",
+    "version": "1.0.0",
+    "description": "8時間ごとに通知する経過時間カウンター",
+    "permissions": [
+        "alarms",
+        "storage",
+        "offscreen"
+    ],
+    "background": {
+        "service_worker": "background.js"
+    },
+    "action": {
+        "default_title": "time tracker"
+    }
+}

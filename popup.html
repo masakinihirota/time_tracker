@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>time tracker</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      width: 270px;
+      font-family: "Segoe UI", "Hiragino Sans", sans-serif;
+      background: #1a1a2e;
+      color: #e0e0e0;
+      user-select: none;
+    }
+    .container { display:flex; flex-direction:column; align-items:center; padding:18px 16px 16px; gap:12px; }
+    .title { font-size:12px; font-weight:600; letter-spacing:2px; text-transform:uppercase; color:#90caf9; opacity:.8; }
+
+    /* set view */
+    #set-view { display:flex; flex-direction:column; align-items:center; gap:10px; width:100%; }
+    .set-instruction { font-size:11px; color:#78909c; text-align:center; line-height:1.5; }
+
+    #tap-btn {
+      width:110px; height:110px; border-radius:50%;
+      border:3px solid #F9A825; background:#16213e;
+      cursor:pointer; display:flex; flex-direction:column;
+      align-items:center; justify-content:center;
+      transition:background .15s, transform .1s; gap:2px;
+    }
+    #tap-btn:hover  { background:#1e2d4e; }
+    #tap-btn:active { transform:scale(.94); }
+    #tap-num  { font-size:52px; font-weight:800; color:#F9A825; line-height:1; }
+    #tap-unit { font-size:11px; color:#F9A825; opacity:.75; }
+
+    .countdown-wrap { width:100%; display:flex; flex-direction:column; align-items:center; gap:4px; opacity:0; transition:opacity .3s; }
+    .countdown-wrap.visible { opacity:1; }
+    .countdown-track { width:100%; height:6px; background:#263238; border-radius:3px; overflow:hidden; }
+    #countdown-bar { height:100%; background:#F9A825; border-radius:3px; width:100%; transition:width .1s linear; }
+    #countdown-text { font-size:11px; color:#607d8b; }
+
+    #set-info { font-size:12px; color:#b0bec5; text-align:center; min-height:16px; }
+
+    #start-now-btn {
+      width:100%; padding:9px 0; border:none; border-radius:8px;
+      background:#1976D2; color:#fff; font-size:14px; font-weight:700;
+      cursor:pointer; transition:background .2s, transform .1s; display:none;
+    }
+    #start-now-btn.visible { display:block; }
+    #start-now-btn:hover  { background:#1565C0; }
+    #start-now-btn:active { transform:scale(.97); }
+
+    /* run view */
+    #run-view { display:none; flex-direction:column; align-items:center; gap:10px; width:100%; }
+    .elapsed-wrap { width:100%; background:#16213e; border-radius:12px; padding:14px 8px; text-align:center; border:1px solid #0f3460; }
+    #elapsed-time { font-size:40px; font-weight:700; letter-spacing:3px; font-variant-numeric:tabular-nums; color:#64b5f6; transition:color .4s; }
+    #elapsed-time.orange { color:#ffb74d; }
+    #elapsed-time.red    { color:#ef5350; }
+    #status-label  { margin-top:4px; font-size:11px; color:#78909c; }
+    #next-label    { font-size:11px; color:#546e7a; min-height:14px; }
+    #alert-badge   { display:none; width:100%; padding:7px 10px; background:#e65100; border-radius:8px; font-size:12px; font-weight:600; color:#fff; text-align:center; }
+    #alert-badge.visible { display:block; }
+    #reset-btn { width:100%; padding:9px 0; border:none; border-radius:8px; background:#37474f; color:#eceff1; font-size:14px; font-weight:700; cursor:pointer; transition:background .2s, transform .1s; }
+    #reset-btn:hover  { background:#455a64; }
+    #reset-btn:active { transform:scale(.97); }
+  </style>
+</head>
+<body>
+<div class="container">
+  <div class="title">&#9201; time tracker</div>
+
+  <!-- set view (idle / pending) -->
+  <div id="set-view">
+    <div class="set-instruction">ボタンをタップして開始時間を設定<br>（1タップ＝1時間前から開始）</div>
+    <button id="tap-btn">
+      <span id="tap-num">0</span>
+      <span id="tap-unit">時間目から</span>
+    </button>
+    <div id="set-info"></div>
+    <div class="countdown-wrap" id="countdown-wrap">
+      <div class="countdown-track"><div id="countdown-bar"></div></div>
+      <div id="countdown-text"></div>
+    </div>
+    <button id="start-now-btn">今すぐ開始</button>
+  </div>
+
+  <!-- run view -->
+  <div id="run-view">
+    <div class="elapsed-wrap">
+      <div id="elapsed-time">00 : 00 : 00</div>
+      <div id="status-label">計測中…</div>
+    </div>
+    <div id="next-label"></div>
+    <div id="alert-badge">&#9888; 8時間を超えました</div>
+    <button id="reset-btn">やり直し（リセット）</button>
+  </div>
+</div>
+<script src="popup.js"></script>
+</body>
+</html>
