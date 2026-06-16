@@ -6,8 +6,7 @@ const TICK_ALARM   = 'timer-tick';     // 毎分アイコン更新
 const EIGHT_HOURS  = 8  * 60 * 60 * 1000;
 const TEN_HOURS    = 10 * 60 * 60 * 1000;
 const CONFIRM_SEC  = 5; // 何秒後に自動確定するか
-const STOP_CLICK_WINDOW_MS = 1500;
-const STOP_CLICK_COUNT = 3;
+const STOP_MENU_ID = 'stop-timer';
 
 // ── 色定数 ───────────────────────────────────────────────────
 const COLOR_IDLE    = '#9e9e9e'; // 未開始：グレー
@@ -23,12 +22,19 @@ chrome.runtime.onStartup.addListener(init);
 chrome.action.onClicked.addListener(() => {
   handleActionClick().catch(() => {});
 });
+chrome.contextMenus.onClicked.addListener((info) => {
+  if (info.menuItemId === STOP_MENU_ID) {
+    stopTimer().catch(() => {});
+  }
+});
 
 async function init() {
+  await ensureStopContextMenu();
+
   const data = await chrome.storage.local.get(
     [
       'timerState', 'startTime', 'hourOffset', 'notified8h', 'pendingOffset',
-      'nextChimeElapsedMs', 'stopClickCount', 'stopWindowStart'
+      'nextChimeElapsedMs'
     ]
   );
 
@@ -67,6 +73,15 @@ async function init() {
     await chrome.storage.local.set({ timerState: 'idle', pendingOffset: 0 });
     await drawIcon('', COLOR_IDLE);
   }
+}
+
+async function ensureStopContextMenu() {
+  await chrome.contextMenus.removeAll();
+  chrome.contextMenus.create({
+    id: STOP_MENU_ID,
+    title: 'ストップ',
+    contexts: ['action'],
+  });
 }
 
 // ── アラーム ─────────────────────────────────────────────────
@@ -110,9 +125,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
 // ── アイコン押下でオフセット選択 ───────────────────────────────
 async function handleActionClick() {
-  const data = await chrome.storage.local.get([
-    'timerState', 'pendingOffset', 'stopClickCount', 'stopWindowStart'
-  ]);
+  const data = await chrome.storage.local.get(['timerState', 'pendingOffset']);
 
   if (data.timerState === 'pending') {
     // 1回目=0, 2回目=1, 3回目=2 ... 最大7
@@ -122,29 +135,22 @@ async function handleActionClick() {
   }
 
   if (data.timerState === 'running') {
-    // Chrome拡張アイコンでは長押し判定ができないため、短時間3連打を停止操作に割り当てる
-    const now = Date.now();
-    const inWindow = data.stopWindowStart && (now - data.stopWindowStart <= STOP_CLICK_WINDOW_MS);
-    const nextCount = inWindow ? (data.stopClickCount || 0) + 1 : 1;
-    const windowStart = inWindow ? data.stopWindowStart : now;
-
-    if (nextCount >= STOP_CLICK_COUNT) {
-      await stopTimer();
-      return;
-    }
-
+    // 1クリックで即 0 から再設定できるようにする
+    await chrome.alarms.clear(TICK_ALARM);
     await chrome.storage.local.set({
-      stopClickCount: nextCount,
-      stopWindowStart: windowStart,
+      timerState: 'idle',
+      startTime: null,
+      hourOffset: 0,
+      nextChimeElapsedMs: null,
+      notified8h: false,
+      alarmFireTime: null,
+      pendingOffset: 0,
     });
-    return;
   }
 
   if (data.timerState === 'stopped') {
     await chrome.storage.local.set({
       timerState: 'idle',
-      stopClickCount: 0,
-      stopWindowStart: null,
     });
   }
 
@@ -160,8 +166,6 @@ async function setPendingOffset(offset) {
     timerState:    'pending',
     pendingOffset: offset,
     alarmFireTime: fireTime,
-    stopClickCount: 0,
-    stopWindowStart: null,
   });
 
   await drawIcon(String(offset), COLOR_PENDING);
@@ -179,8 +183,6 @@ async function startTimer(hourOffset) {
     pendingOffset: 0,
     notified8h:    false,
     alarmFireTime: null,
-    stopClickCount: 0,
-    stopWindowStart: null,
   });
 
   await chrome.alarms.clear(TICK_ALARM);
@@ -200,8 +202,6 @@ async function resetTimer() {
     nextChimeElapsedMs: null,
     notified8h:    false,
     alarmFireTime: null,
-    stopClickCount: 0,
-    stopWindowStart: null,
   });
   chrome.offscreen.closeDocument().catch(() => {});
   await drawIcon('', COLOR_IDLE);
@@ -212,8 +212,6 @@ async function stopTimer() {
   await chrome.alarms.clear(OFFSET_ALARM);
   await chrome.storage.local.set({
     timerState: 'stopped',
-    stopClickCount: 0,
-    stopWindowStart: null,
   });
   await drawIcon('STOP', COLOR_STOP);
 }
