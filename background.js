@@ -6,6 +6,8 @@ const TICK_ALARM   = 'timer-tick';     // 毎分アイコン更新
 const EIGHT_HOURS  = 8  * 60 * 60 * 1000;
 const TEN_HOURS    = 10 * 60 * 60 * 1000;
 const CONFIRM_SEC  = 5; // 何秒後に自動確定するか
+const STOP_CLICK_WINDOW_MS = 1500;
+const STOP_CLICK_COUNT = 3;
 
 // ── 色定数 ───────────────────────────────────────────────────
 const COLOR_IDLE    = '#9e9e9e'; // 未開始：グレー
@@ -13,6 +15,7 @@ const COLOR_PENDING = '#F9A825'; // セット中：アンバー
 const COLOR_BLUE    = '#1976D2'; // 通常：青
 const COLOR_ORANGE  = '#F57C00'; // 8時間超：オレンジ
 const COLOR_RED     = '#D32F2F'; // 10時間超：赤
+const COLOR_STOP    = '#B71C1C'; // 停止：赤
 
 // ── 起動・インストール時 ───────────────────────────────────────
 chrome.runtime.onInstalled.addListener(init);
@@ -23,7 +26,10 @@ chrome.action.onClicked.addListener(() => {
 
 async function init() {
   const data = await chrome.storage.local.get(
-    ['timerState', 'startTime', 'hourOffset', 'notified8h', 'pendingOffset', 'nextChimeElapsedMs']
+    [
+      'timerState', 'startTime', 'hourOffset', 'notified8h', 'pendingOffset',
+      'nextChimeElapsedMs', 'stopClickCount', 'stopWindowStart'
+    ]
   );
 
   if (data.timerState === 'running' && data.startTime) {
@@ -53,6 +59,9 @@ async function init() {
     } else {
       await drawIcon(String(data.pendingOffset || 0), COLOR_PENDING);
     }
+
+  } else if (data.timerState === 'stopped') {
+    await drawIcon('STOP', COLOR_STOP);
 
   } else {
     await chrome.storage.local.set({ timerState: 'idle', pendingOffset: 0 });
@@ -101,7 +110,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
 // ── アイコン押下でオフセット選択 ───────────────────────────────
 async function handleActionClick() {
-  const data = await chrome.storage.local.get(['timerState', 'pendingOffset']);
+  const data = await chrome.storage.local.get([
+    'timerState', 'pendingOffset', 'stopClickCount', 'stopWindowStart'
+  ]);
 
   if (data.timerState === 'pending') {
     // 1回目=0, 2回目=1, 3回目=2 ... 最大7
@@ -111,15 +122,29 @@ async function handleActionClick() {
   }
 
   if (data.timerState === 'running') {
-    // 計測中に押したら、再設定モードへ入り直す
-    await chrome.alarms.clear(TICK_ALARM);
+    // Chrome拡張アイコンでは長押し判定ができないため、短時間3連打を停止操作に割り当てる
+    const now = Date.now();
+    const inWindow = data.stopWindowStart && (now - data.stopWindowStart <= STOP_CLICK_WINDOW_MS);
+    const nextCount = inWindow ? (data.stopClickCount || 0) + 1 : 1;
+    const windowStart = inWindow ? data.stopWindowStart : now;
+
+    if (nextCount >= STOP_CLICK_COUNT) {
+      await stopTimer();
+      return;
+    }
+
     await chrome.storage.local.set({
-      timerState:    'idle',
-      startTime:     null,
-      hourOffset:    0,
-      notified8h:    false,
-      pendingOffset: 0,
-      alarmFireTime: null,
+      stopClickCount: nextCount,
+      stopWindowStart: windowStart,
+    });
+    return;
+  }
+
+  if (data.timerState === 'stopped') {
+    await chrome.storage.local.set({
+      timerState: 'idle',
+      stopClickCount: 0,
+      stopWindowStart: null,
     });
   }
 
@@ -135,6 +160,8 @@ async function setPendingOffset(offset) {
     timerState:    'pending',
     pendingOffset: offset,
     alarmFireTime: fireTime,
+    stopClickCount: 0,
+    stopWindowStart: null,
   });
 
   await drawIcon(String(offset), COLOR_PENDING);
@@ -152,6 +179,8 @@ async function startTimer(hourOffset) {
     pendingOffset: 0,
     notified8h:    false,
     alarmFireTime: null,
+    stopClickCount: 0,
+    stopWindowStart: null,
   });
 
   await chrome.alarms.clear(TICK_ALARM);
@@ -171,9 +200,22 @@ async function resetTimer() {
     nextChimeElapsedMs: null,
     notified8h:    false,
     alarmFireTime: null,
+    stopClickCount: 0,
+    stopWindowStart: null,
   });
   chrome.offscreen.closeDocument().catch(() => {});
   await drawIcon('', COLOR_IDLE);
+}
+
+async function stopTimer() {
+  await chrome.alarms.clear(TICK_ALARM);
+  await chrome.alarms.clear(OFFSET_ALARM);
+  await chrome.storage.local.set({
+    timerState: 'stopped',
+    stopClickCount: 0,
+    stopWindowStart: null,
+  });
+  await drawIcon('STOP', COLOR_STOP);
 }
 
 // ── 実行中アイコン更新 ────────────────────────────────────────
