@@ -3,17 +3,17 @@
 
 const OFFSET_ALARM = 'offset-confirm'; // 5秒後にタイマー開始
 const TICK_ALARM   = 'timer-tick';     // 毎分アイコン更新
+const STOP_RESET_ALARM = 'stop-reset'; // 停止表示を一定時間で解除
 const EIGHT_HOURS  = 8  * 60 * 60 * 1000;
-const TEN_HOURS    = 10 * 60 * 60 * 1000;
 const CONFIRM_SEC  = 5; // 何秒後に自動確定するか
 const STOP_MENU_ID = 'stop-timer';
+const TEST_SOUND_MENU_ID = 'test-sound';
+const STOP_DISPLAY_MS = 5000;
 
 // ── 色定数 ───────────────────────────────────────────────────
 const COLOR_IDLE    = '#9e9e9e'; // 未開始：グレー
 const COLOR_PENDING = '#F9A825'; // セット中：アンバー
 const COLOR_BLUE    = '#1976D2'; // 通常：青
-const COLOR_ORANGE  = '#F57C00'; // 8時間超：オレンジ
-const COLOR_RED     = '#D32F2F'; // 10時間超：赤
 const COLOR_STOP    = '#B71C1C'; // 停止：赤
 
 // ── 起動・インストール時 ───────────────────────────────────────
@@ -25,6 +25,10 @@ chrome.action.onClicked.addListener(() => {
 chrome.contextMenus.onClicked.addListener((info) => {
   if (info.menuItemId === STOP_MENU_ID) {
     stopTimer().catch(() => {});
+    return;
+  }
+  if (info.menuItemId === TEST_SOUND_MENU_ID) {
+    triggerAlarmSound().catch(() => {});
   }
 });
 
@@ -34,7 +38,7 @@ async function init() {
   const data = await chrome.storage.local.get(
     [
       'timerState', 'startTime', 'hourOffset', 'notified8h', 'pendingOffset',
-      'nextChimeElapsedMs'
+      'nextChimeElapsedMs', 'stopUntil'
     ]
   );
 
@@ -67,7 +71,14 @@ async function init() {
     }
 
   } else if (data.timerState === 'stopped') {
-    await drawIcon('STOP', COLOR_STOP);
+    const now = Date.now();
+    if (data.stopUntil && now < data.stopUntil) {
+      await drawIcon('STOP', COLOR_STOP);
+      await ensureStopResetAlarm(data.stopUntil - now);
+    } else {
+      await chrome.storage.local.set({ timerState: 'idle', stopUntil: null });
+      await drawIcon('', COLOR_IDLE);
+    }
 
   } else {
     await chrome.storage.local.set({ timerState: 'idle', pendingOffset: 0 });
@@ -80,6 +91,11 @@ async function ensureStopContextMenu() {
   chrome.contextMenus.create({
     id: STOP_MENU_ID,
     title: 'ストップ',
+    contexts: ['action'],
+  });
+  chrome.contextMenus.create({
+    id: TEST_SOUND_MENU_ID,
+    title: '音のテスト',
     contexts: ['action'],
   });
 }
@@ -113,6 +129,14 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 
     await updateRunningIcon(data.startTime, data.hourOffset || 0, data.notified8h || false);
   }
+
+  if (alarm.name === STOP_RESET_ALARM) {
+    const { timerState } = await chrome.storage.local.get(['timerState']);
+    if (timerState === 'stopped') {
+      await chrome.storage.local.set({ timerState: 'idle', stopUntil: null });
+      await drawIcon('', COLOR_IDLE);
+    }
+  }
 });
 
 // ── メッセージ ────────────────────────────────────────────────
@@ -137,6 +161,7 @@ async function handleActionClick() {
   if (data.timerState === 'running') {
     // 1クリックで即 0 から再設定できるようにする
     await chrome.alarms.clear(TICK_ALARM);
+    await chrome.alarms.clear(STOP_RESET_ALARM);
     await chrome.storage.local.set({
       timerState: 'idle',
       startTime: null,
@@ -149,8 +174,10 @@ async function handleActionClick() {
   }
 
   if (data.timerState === 'stopped') {
+    await chrome.alarms.clear(STOP_RESET_ALARM);
     await chrome.storage.local.set({
       timerState: 'idle',
+      stopUntil: null,
     });
   }
 
@@ -194,6 +221,7 @@ async function startTimer(hourOffset) {
 async function resetTimer() {
   await chrome.alarms.clear(TICK_ALARM);
   await chrome.alarms.clear(OFFSET_ALARM);
+  await chrome.alarms.clear(STOP_RESET_ALARM);
   await chrome.storage.local.set({
     timerState:    'idle',
     pendingOffset: 0,
@@ -202,6 +230,7 @@ async function resetTimer() {
     nextChimeElapsedMs: null,
     notified8h:    false,
     alarmFireTime: null,
+    stopUntil: null,
   });
   chrome.offscreen.closeDocument().catch(() => {});
   await drawIcon('', COLOR_IDLE);
@@ -210,10 +239,20 @@ async function resetTimer() {
 async function stopTimer() {
   await chrome.alarms.clear(TICK_ALARM);
   await chrome.alarms.clear(OFFSET_ALARM);
+  await chrome.alarms.clear(STOP_RESET_ALARM);
+  const stopUntil = Date.now() + STOP_DISPLAY_MS;
   await chrome.storage.local.set({
     timerState: 'stopped',
+    stopUntil,
   });
+  await ensureStopResetAlarm(STOP_DISPLAY_MS);
   await drawIcon('STOP', COLOR_STOP);
+}
+
+async function ensureStopResetAlarm(delayMs) {
+  const safeDelayMs = Math.max(1000, delayMs);
+  await chrome.alarms.clear(STOP_RESET_ALARM);
+  chrome.alarms.create(STOP_RESET_ALARM, { delayInMinutes: safeDelayMs / 60000 });
 }
 
 // ── 実行中アイコン更新 ────────────────────────────────────────
@@ -225,12 +264,7 @@ async function updateRunningIcon(startTime, hourOffset, notified8h) {
   const displayNum = (totalHours > 0 && hoursInDay === 0 && onHourBoundary) ? 24 : hoursInDay;
   const text       = String(displayNum);
 
-  let color;
-  if (elapsed >= TEN_HOURS)                        color = COLOR_RED;
-  else if (notified8h || elapsed >= EIGHT_HOURS)   color = COLOR_ORANGE;
-  else                                             color = COLOR_BLUE;
-
-  await drawIcon(text, color);
+  await drawIcon(text, COLOR_BLUE);
 }
 
 // ── OffscreenCanvas でアイコン描画 ────────────────────────────
