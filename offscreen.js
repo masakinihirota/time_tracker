@@ -12,8 +12,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 });
 
 async function playAlarm() {
-  const DURATION = 0.6;  // 1回だけの短いチャイム
-  const BEEP_LEN = 0.32; // ゆるやかな単音
+  const DURATION = 0.8;  // 少し長めのチャイム
+  const BEEP_LEN = 0.42; // ゆるやかな単音
 
   const ctx = new AudioContext();
 
